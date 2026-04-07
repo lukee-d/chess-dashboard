@@ -101,23 +101,30 @@ function myColor(g, u) {
   return g.white.username.toLowerCase() === u.toLowerCase() ? "white" : "black";
 }
 function opening(pgn) {
-  const m = pgn?.match(/\[Opening\s+"([^"]+)"\]/);
-  return m ? m[1] : "Unknown";
+  if (!pgn) return null;
+  // Try the Opening tag first
+  const m = pgn.match(/\[Opening\s+"([^"]+)"\]/);
+  if (m) return m[1];
+  // Chess.com often stores it in ECOUrl instead, like:
+  // [ECOUrl "https://www.chess.com/openings/Kings-Pawn-Opening"]
+  const eco = pgn.match(/\[ECOUrl\s+"https:\/\/www\.chess\.com\/openings\/([^"]+)"\]/);
+  if (eco) return eco[1].replace(/-/g, " ").replace(/\.\.\./g, "...");
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
 // RATING CHART (D3)
 // ═══════════════════════════════════════════════════════════
-function RatingChart({ games, username }) {
+function RatingChart({ games, username, tc = "blitz" }) {
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
 
   useEffect(() => {
     if (!games.length || !svgRef.current) return;
-    const blitz = games.filter(g => g.time_class === "blitz").sort((a,b) => a.end_time - b.end_time);
-    if (!blitz.length) return;
+    const filtered = games.filter(g => g.time_class === tc).sort((a,b) => a.end_time - b.end_time);
+    if (!filtered.length) return;
 
-    const data = blitz.map((g, i) => ({
+    const data = filtered.map((g, i) => ({
       i, rating: myRating(g, username), res: result(g, username),
       date: new Date(g.end_time * 1000),
     }));
@@ -167,7 +174,7 @@ function RatingChart({ games, username }) {
       .attr("text-anchor","middle").attr("fill","#c89b3c")
       .attr("font-size","12px").attr("font-weight","700")
       .attr("font-family","'DM Mono', monospace").text(last.rating);
-  }, [games, username]);
+  }, [games, username, tc]);
 
   return <div ref={wrapRef} style={{width:"100%"}}><svg ref={svgRef} style={{display:"block"}} /></div>;
 }
@@ -185,8 +192,8 @@ function Stat({ label, value, sub, color }) {
   );
 }
 
-function RecentGames({ games, u }) {
-  const recent = games.filter(g => g.time_class === "blitz").sort((a,b) => b.end_time - a.end_time).slice(0, 10);
+function RecentGames({ games, u, tc = "blitz" }) {
+  const recent = games.filter(g => g.time_class === tc).sort((a,b) => b.end_time - a.end_time).slice(0, 10);
   return (
     <div style={s.panel}>
       <h2 style={s.panelH}>Recent Games</h2>
@@ -207,7 +214,7 @@ function RecentGames({ games, u }) {
                   <span style={{color: col==="white"?"#ddd":"#666", marginRight:5, fontSize:10}}>{col==="white"?"♔":"♚"}</span>
                   vs {oN} <span style={s.gOppR}>({oR})</span>
                 </div>
-                <div style={s.gOpen}>{op}</div>
+                {op && <div style={s.gOpen}>{op}</div>}
               </div>
             </a>
           );
@@ -217,10 +224,11 @@ function RecentGames({ games, u }) {
   );
 }
 
-function Openings({ games, u }) {
+function Openings({ games, u, tc = "blitz" }) {
   const map = {};
-  games.filter(g => g.time_class === "blitz").forEach(g => {
+  games.filter(g => g.time_class === tc).forEach(g => {
     const op = opening(g.pgn), res = result(g, u);
+    if (!op) return; // skip games with no opening data
     if (!map[op]) map[op] = { t: 0, w: 0, l: 0, d: 0 };
     map[op].t++; map[op][res[0]]++;
   });
@@ -275,6 +283,83 @@ function Puzzle({ puzzle }) {
   );
 }
 
+function ColorPerformance({ games, u, tc = "blitz" }) {
+  const filtered = games.filter(g => g.time_class === tc);
+  const white = { w: 0, l: 0, d: 0, ratingDelta: 0 };
+  const black = { w: 0, l: 0, d: 0, ratingDelta: 0 };
+
+  // Sort by time to calculate rating deltas
+  const sorted = [...filtered].sort((a, b) => a.end_time - b.end_time);
+  for (let i = 0; i < sorted.length; i++) {
+    const g = sorted[i];
+    const isW = g.white.username.toLowerCase() === u.toLowerCase();
+    const bucket = isW ? white : black;
+    const res = result(g, u);
+    bucket[res[0]]++;
+    // Rating delta: compare to previous game's rating
+    if (i > 0) {
+      const prev = myRating(sorted[i - 1], u);
+      const curr = myRating(g, u);
+      bucket.ratingDelta += curr - prev;
+    }
+  }
+
+  const whiteTotal = white.w + white.l + white.d;
+  const blackTotal = black.w + black.l + black.d;
+  const whiteWinPct = whiteTotal ? Math.round((white.w / whiteTotal) * 100) : 0;
+  const blackWinPct = blackTotal ? Math.round((black.w / blackTotal) * 100) : 0;
+  const gap = whiteWinPct - blackWinPct;
+
+  function Bar({ label, icon, data, total, winPct, color }) {
+    const lossPct = total ? Math.round((data.l / total) * 100) : 0;
+    const drawPct = total ? 100 - winPct - lossPct : 0;
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <span style={{ fontSize: 13, color: "#bbb", fontWeight: 500 }}>{label}</span>
+            <span style={{ fontSize: 11, color: "#444" }}>({total} games)</span>
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, fontFamily: "'Cormorant Garamond',serif", color: winPct >= 50 ? "#4ade80" : winPct >= 45 ? "#c89b3c" : "#f87171" }}>
+            {winPct}% wins
+          </span>
+        </div>
+        <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", gap: 1 }}>
+          <div style={{ width: `${winPct}%`, background: "#4ade80", borderRadius: "5px 0 0 5px", transition: "width .6s ease" }} />
+          <div style={{ width: `${drawPct}%`, background: "#555", transition: "width .6s ease" }} />
+          <div style={{ width: `${lossPct}%`, background: "#f87171", borderRadius: "0 5px 5px 0", transition: "width .6s ease" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#555", marginTop: 4 }}>
+          <span><span style={{ color: "#4ade80" }}>{data.w}W</span> · <span style={{ color: "#f87171" }}>{data.l}L</span> · <span style={{ color: "#666" }}>{data.d}D</span></span>
+          <span style={{ color: data.ratingDelta >= 0 ? "#4ade80" : "#f87171" }}>
+            {data.ratingDelta >= 0 ? "+" : ""}{data.ratingDelta} rating
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Insight text
+  let insight = "";
+  if (Math.abs(gap) < 3) insight = "Your performance is balanced across both colors — no significant gap.";
+  else if (gap > 0) insight = `You win ${gap} percentage points more as White. Consider studying Black openings to close the gap.`;
+  else insight = `You win ${Math.abs(gap)} percentage points more as Black — unusual! Your White repertoire might need some work.`;
+
+  return (
+    <div style={s.panel}>
+      <h2 style={s.panelH}>Performance by Color</h2>
+      <div style={{ marginTop: 14 }}>
+        <Bar label="White" icon="♔" data={white} total={whiteTotal} winPct={whiteWinPct} />
+        <Bar label="Black" icon="♚" data={black} total={blackTotal} winPct={blackWinPct} />
+      </div>
+      <div style={{ fontSize: 12, color: "#888", marginTop: 8, padding: "10px 12px", background: "#0d0d0d", borderRadius: 4, border: "1px solid #1a1a1a", lineHeight: 1.5 }}>
+        💡 {insight}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════
@@ -282,6 +367,7 @@ export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mock, setMock] = useState(false);
+  const [tc, setTc] = useState("blitz"); // "blitz" | "rapid" | "bullet"
 
   useEffect(() => {
     loadAllData(CHESS_USERNAME)
@@ -298,24 +384,27 @@ export default function App() {
   );
 
   const { stats, puzzle, games } = data;
-  const bl = stats?.chess_blitz;
-  const rp = stats?.chess_rapid;
-  const bu = stats?.chess_bullet;
+  const tcKey = `chess_${tc}`;
+  const activeStat = stats?.[tcKey];
 
-  const blitzG = games.filter(g => g.time_class === "blitz");
-  const w = blitzG.filter(g => result(g, CHESS_USERNAME) === "win").length;
-  const l = blitzG.filter(g => result(g, CHESS_USERNAME) === "loss").length;
-  const d = blitzG.filter(g => result(g, CHESS_USERNAME) === "draw").length;
+  // Filter games by selected time control
+  const filtered = games.filter(g => g.time_class === tc);
+  const w = filtered.filter(g => result(g, CHESS_USERNAME) === "win").length;
+  const l = filtered.filter(g => result(g, CHESS_USERNAME) === "loss").length;
+  const d = filtered.filter(g => result(g, CHESS_USERNAME) === "draw").length;
 
   // Streak calc
-  const sorted = [...blitzG].sort((a,b) => b.end_time - a.end_time);
+  const sorted = [...filtered].sort((a,b) => b.end_time - a.end_time);
   let streak = 0, sType = null;
   for (const g of sorted) {
     const r = result(g, CHESS_USERNAME);
     if (!sType) sType = r;
     if (r === sType) streak++; else break;
   }
-  const sLabel = sType === "win" ? `${streak}W streak 🔥` : sType === "loss" ? `${streak}L streak` : `${streak} draws`;
+  const sLabel = sType === "win" ? `${streak}W streak 🔥` : sType === "loss" ? `${streak}L streak` : sType ? `${streak} draws` : "";
+
+  const tcLabel = tc.charAt(0).toUpperCase() + tc.slice(1);
+  const tcOptions = ["blitz", "rapid", "bullet"];
 
   return (
     <div style={s.root}>
@@ -331,9 +420,21 @@ export default function App() {
         <div style={s.headerIn}>
           <div>
             <h1 style={s.title}><span style={{color:"#c89b3c",fontSize:24}}>♟</span> {CHESS_USERNAME}</h1>
-            <p style={s.sub}>Blitz Dashboard</p>
+            <p style={s.sub}>{tcLabel} Dashboard</p>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
+            {/* Time control toggle */}
+            <div style={s.tcToggle}>
+              {tcOptions.map(opt => (
+                <button key={opt} onClick={() => setTc(opt)}
+                  style={{
+                    ...s.tcBtn,
+                    ...(tc === opt ? s.tcBtnActive : {}),
+                  }}>
+                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                </button>
+              ))}
+            </div>
             {mock && <div style={s.mockTag}>Preview — mock data</div>}
             <a href={`https://chess.com/member/${CHESS_USERNAME}`} target="_blank" rel="noopener noreferrer"
               style={{fontSize:12, color:"#c89b3c", textDecoration:"none", border:"1px solid #c89b3c33", padding:"5px 12px", borderRadius:4}}>
@@ -346,31 +447,35 @@ export default function App() {
       <div style={s.content}>
         {/* Stats */}
         <div style={s.statsRow}>
-          <Stat label="Blitz Rating" value={bl?.last?.rating || "—"} sub={`Peak: ${bl?.best?.rating || "—"}`} />
-          <Stat label="Blitz Record" value={`${w}W · ${l}L · ${d}D`} sub={sLabel}
+          <Stat label={`${tcLabel} Rating`} value={activeStat?.last?.rating || "—"} sub={`Peak: ${activeStat?.best?.rating || "—"}`} />
+          <Stat label={`${tcLabel} Record`} value={`${w}W · ${l}L · ${d}D`} sub={sLabel}
             color={sType==="win"?"#4ade80":sType==="loss"?"#f87171":"#666"} />
-          {rp && <Stat label="Rapid" value={rp?.last?.rating||"—"} sub={`Peak: ${rp?.best?.rating||"—"}`} />}
-          {bu && <Stat label="Bullet" value={bu?.last?.rating||"—"} sub={`Peak: ${bu?.best?.rating||"—"}`} />}
+          <Stat label="Games Analyzed" value={filtered.length} sub={`Last ${Math.min(3, Math.ceil(filtered.length / 30))} months`} />
         </div>
 
         {/* Chart */}
         <div style={{...s.panel, marginTop:16}}>
           <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
-            <h2 style={s.panelH}>Rating History</h2>
+            <h2 style={s.panelH}>{tcLabel} Rating History</h2>
             <div style={{display:"flex",gap:14,fontSize:11,color:"#555"}}>
               <span><span style={{color:"#4ade80"}}>●</span> Win</span>
               <span><span style={{color:"#f87171"}}>●</span> Loss</span>
               <span><span style={{color:"#666"}}>●</span> Draw</span>
             </div>
           </div>
-          <RatingChart games={games} username={CHESS_USERNAME} />
+          <RatingChart games={games} username={CHESS_USERNAME} tc={tc} />
         </div>
 
         {/* Grid */}
         <div style={s.grid}>
-          <RecentGames games={games} u={CHESS_USERNAME} />
-          <Openings games={games} u={CHESS_USERNAME} />
+          <RecentGames games={games} u={CHESS_USERNAME} tc={tc} />
+          <Openings games={games} u={CHESS_USERNAME} tc={tc} />
           <Puzzle puzzle={puzzle} />
+        </div>
+
+        {/* Analysis Row */}
+        <div style={{ marginTop: 16 }}>
+          <ColorPerformance games={games} u={CHESS_USERNAME} tc={tc} />
         </div>
       </div>
 
@@ -410,4 +515,12 @@ const s = {
   oBarFill: { height:"100%", background:"#282828", borderRadius:4, position:"relative", overflow:"hidden", transition:"width .6s ease" },
   oBarWin: { position:"absolute", top:0, left:0, height:"100%", background:"#4ade8044", borderRadius:4 },
   footer: { maxWidth:1100, margin:"28px auto 0", padding:"14px 28px", borderTop:"1px solid #1a1a1a", fontSize:10, color:"#333", textAlign:"center" },
+  tcToggle: { display:"flex", background:"#0d0d0d", border:"1px solid #1a1a1a", borderRadius:5, overflow:"hidden" },
+  tcBtn: {
+    background:"transparent", border:"none", color:"#555", fontSize:11, fontFamily:"'DM Mono',monospace",
+    padding:"5px 14px", cursor:"pointer", transition:"all .15s", letterSpacing:"0.5px",
+  },
+  tcBtnActive: {
+    background:"#c89b3c18", color:"#c89b3c", borderBottom:"none",
+  },
 };
