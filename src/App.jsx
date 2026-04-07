@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import * as d3 from "d3";
 
 // ═══════════════════════════════════════════════════════════
-// CONFIG — Change this to your Chess.com username
+// CONFIG
 // ═══════════════════════════════════════════════════════════
-const CHESS_USERNAME = "lukedoudna";
+const DEFAULT_USERNAME = "lukedoudna";
 
 // ═══════════════════════════════════════════════════════════
 // API LAYER
@@ -57,8 +57,8 @@ function mockData() {
     games.push({
       url: `https://chess.com/game/live/${1000+i}`, time_class: "blitz",
       end_time: now - (50 - i) * 43200,
-      white: { username: isW ? CHESS_USERNAME : `opp_${i}`, rating: isW ? rating : opp, result: isW ? result : (result==="win"?"checkmated":result==="checkmated"?"win":result) },
-      black: { username: isW ? `opp_${i}` : CHESS_USERNAME, rating: isW ? opp : rating, result: !isW ? result : (result==="win"?"checkmated":result==="checkmated"?"win":result) },
+      white: { username: isW ? DEFAULT_USERNAME : `opp_${i}`, rating: isW ? rating : opp, result: isW ? result : (result==="win"?"checkmated":result==="checkmated"?"win":result) },
+      black: { username: isW ? `opp_${i}` : DEFAULT_USERNAME, rating: isW ? opp : rating, result: !isW ? result : (result==="win"?"checkmated":result==="checkmated"?"win":result) },
       pgn: `[Opening "${op}"]\n1. e4 e5`,
     });
   }
@@ -361,43 +361,123 @@ function ColorPerformance({ games, u, tc = "blitz" }) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// LANDING SCREEN
+// ═══════════════════════════════════════════════════════════
+function LandingScreen({ onSubmit }) {
+  const [input, setInput] = useState("");
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+
+  async function handleSubmit(username) {
+    const name = (username || input).trim().toLowerCase();
+    if (!name) return;
+    setError("");
+    setChecking(true);
+    try {
+      await apiFetch(`${API}/player/${name}`);
+      onSubmit(name);
+    } catch (e) {
+      setError(`Player "${name}" not found on Chess.com`);
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div style={s.root}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap');
+        @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+        *{box-sizing:border-box;margin:0;padding:0}
+      `}</style>
+      <div style={s.landing}>
+        <div style={s.landingInner}>
+          <div style={{fontSize:48, marginBottom:8}}>♟</div>
+          <h1 style={s.landingTitle}>Chess Dashboard</h1>
+          <p style={s.landingDesc}>
+            Enter a Chess.com username to view ratings, game history, opening repertoire, and performance analytics.
+          </p>
+          <div style={s.inputRow}>
+            <input
+              type="text"
+              placeholder="Chess.com username"
+              value={input}
+              onChange={e => { setInput(e.target.value); setError(""); }}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              style={s.input}
+              autoFocus
+            />
+            <button onClick={() => handleSubmit()} disabled={checking} style={s.goBtn}>
+              {checking ? "..." : "Go"}
+            </button>
+          </div>
+          {error && <div style={s.error}>{error}</div>}
+          <div style={s.landingOr}>or try a demo</div>
+          <button onClick={() => handleSubmit(DEFAULT_USERNAME)} style={s.demoBtn}>
+            View {DEFAULT_USERNAME}'s dashboard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════
 export default function App() {
+  const [username, setUsername] = useState(null);
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [mock, setMock] = useState(false);
-  const [tc, setTc] = useState("blitz"); // "blitz" | "rapid" | "bullet"
+  const [tc, setTc] = useState("blitz");
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    loadAllData(CHESS_USERNAME)
-      .then(d => setData(d))
-      .catch(() => { setData(mockData()); setMock(true); })
+    if (!username) return;
+    setLoading(true);
+    setLoadError("");
+    setData(null);
+    loadAllData(username)
+      .then(d => { setData(d); setMock(false); })
+      .catch(() => { setLoadError("Failed to load data. Check the username and try again."); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [username]);
+
+  if (!username) return <LandingScreen onSubmit={setUsername} />;
 
   if (loading) return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0d0d0d",fontFamily:"'DM Mono',monospace"}}>
+      <style>{`@keyframes spin { to{transform:rotate(360deg)} }`}</style>
       <div style={{width:28,height:28,border:"2px solid #222",borderTopColor:"#c89b3c",borderRadius:"50%",animation:"spin .7s linear infinite"}} />
-      <div style={{marginTop:14,color:"#555",fontSize:12}}>Loading your games...</div>
+      <div style={{marginTop:14,color:"#555",fontSize:12}}>Loading {username}'s games...</div>
     </div>
   );
+
+  if (loadError) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0d0d0d",fontFamily:"'DM Mono',monospace"}}>
+      <div style={{color:"#f87171",fontSize:14,marginBottom:16}}>{loadError}</div>
+      <button onClick={() => setUsername(null)}
+        style={{...s.goBtn, padding:"8px 20px"}}>
+        ← Try another username
+      </button>
+    </div>
+  );
+
+  if (!data) return null;
 
   const { stats, puzzle, games } = data;
   const tcKey = `chess_${tc}`;
   const activeStat = stats?.[tcKey];
 
-  // Filter games by selected time control
   const filtered = games.filter(g => g.time_class === tc);
-  const w = filtered.filter(g => result(g, CHESS_USERNAME) === "win").length;
-  const l = filtered.filter(g => result(g, CHESS_USERNAME) === "loss").length;
-  const d = filtered.filter(g => result(g, CHESS_USERNAME) === "draw").length;
+  const w = filtered.filter(g => result(g, username) === "win").length;
+  const l = filtered.filter(g => result(g, username) === "loss").length;
+  const d = filtered.filter(g => result(g, username) === "draw").length;
 
-  // Streak calc
   const sorted = [...filtered].sort((a,b) => b.end_time - a.end_time);
   let streak = 0, sType = null;
   for (const g of sorted) {
-    const r = result(g, CHESS_USERNAME);
+    const r = result(g, username);
     if (!sType) sType = r;
     if (r === sType) streak++; else break;
   }
@@ -419,24 +499,24 @@ export default function App() {
       <header style={s.header}>
         <div style={s.headerIn}>
           <div>
-            <h1 style={s.title}><span style={{color:"#c89b3c",fontSize:24}}>♟</span> {CHESS_USERNAME}</h1>
+            <h1 style={s.title}><span style={{color:"#c89b3c",fontSize:24}}>♟</span> {username}</h1>
             <p style={s.sub}>{tcLabel} Dashboard</p>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            {/* Time control toggle */}
             <div style={s.tcToggle}>
               {tcOptions.map(opt => (
                 <button key={opt} onClick={() => setTc(opt)}
-                  style={{
-                    ...s.tcBtn,
-                    ...(tc === opt ? s.tcBtnActive : {}),
-                  }}>
+                  style={{...s.tcBtn, ...(tc === opt ? s.tcBtnActive : {})}}>
                   {opt.charAt(0).toUpperCase() + opt.slice(1)}
                 </button>
               ))}
             </div>
             {mock && <div style={s.mockTag}>Preview — mock data</div>}
-            <a href={`https://chess.com/member/${CHESS_USERNAME}`} target="_blank" rel="noopener noreferrer"
+            <button onClick={() => { setUsername(null); setData(null); setTc("blitz"); }}
+              style={s.changeBtn}>
+              Change Player
+            </button>
+            <a href={`https://chess.com/member/${username}`} target="_blank" rel="noopener noreferrer"
               style={{fontSize:12, color:"#c89b3c", textDecoration:"none", border:"1px solid #c89b3c33", padding:"5px 12px", borderRadius:4}}>
               Chess.com Profile →
             </a>
@@ -445,7 +525,6 @@ export default function App() {
       </header>
 
       <div style={s.content}>
-        {/* Stats */}
         <div style={s.statsRow}>
           <Stat label={`${tcLabel} Rating`} value={activeStat?.last?.rating || "—"} sub={`Peak: ${activeStat?.best?.rating || "—"}`} />
           <Stat label={`${tcLabel} Record`} value={`${w}W · ${l}L · ${d}D`} sub={sLabel}
@@ -453,7 +532,6 @@ export default function App() {
           <Stat label="Games Analyzed" value={filtered.length} sub={`Last ${Math.min(3, Math.ceil(filtered.length / 30))} months`} />
         </div>
 
-        {/* Chart */}
         <div style={{...s.panel, marginTop:16}}>
           <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
             <h2 style={s.panelH}>{tcLabel} Rating History</h2>
@@ -463,24 +541,22 @@ export default function App() {
               <span><span style={{color:"#666"}}>●</span> Draw</span>
             </div>
           </div>
-          <RatingChart games={games} username={CHESS_USERNAME} tc={tc} />
+          <RatingChart games={games} username={username} tc={tc} />
         </div>
 
-        {/* Grid */}
         <div style={s.grid}>
-          <RecentGames games={games} u={CHESS_USERNAME} tc={tc} />
-          <Openings games={games} u={CHESS_USERNAME} tc={tc} />
+          <RecentGames games={games} u={username} tc={tc} />
+          <Openings games={games} u={username} tc={tc} />
           <Puzzle puzzle={puzzle} />
         </div>
 
-        {/* Analysis Row */}
         <div style={{ marginTop: 16 }}>
-          <ColorPerformance games={games} u={CHESS_USERNAME} tc={tc} />
+          <ColorPerformance games={games} u={username} tc={tc} />
         </div>
       </div>
 
       <footer style={s.footer}>
-        Data from Chess.com Public API · Built by {CHESS_USERNAME}
+        Data from Chess.com Public API
       </footer>
     </div>
   );
@@ -522,5 +598,48 @@ const s = {
   },
   tcBtnActive: {
     background:"#c89b3c18", color:"#c89b3c", borderBottom:"none",
+  },
+  // Landing screen
+  landing: {
+    display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh",
+    background:"radial-gradient(ellipse at 50% 40%, #141414 0%, #0d0d0d 70%)",
+  },
+  landingInner: {
+    textAlign:"center", maxWidth:420, padding:"0 24px", animation:"fadeUp .6s ease both",
+  },
+  landingTitle: {
+    fontFamily:"'Cormorant Garamond',serif", fontSize:36, fontWeight:700, color:"#e8e0d0",
+    letterSpacing:"-0.5px", marginBottom:10,
+  },
+  landingDesc: {
+    fontSize:13, color:"#666", lineHeight:1.6, marginBottom:28,
+  },
+  inputRow: {
+    display:"flex", gap:8, marginBottom:10,
+  },
+  input: {
+    flex:1, background:"#111", border:"1px solid #1a1a1a", borderRadius:5,
+    padding:"10px 14px", color:"#ddd", fontSize:14, fontFamily:"'DM Mono',monospace",
+    outline:"none",
+  },
+  goBtn: {
+    background:"#c89b3c", color:"#0d0d0d", border:"none", borderRadius:5,
+    padding:"10px 20px", fontSize:13, fontWeight:700, fontFamily:"'DM Mono',monospace",
+    cursor:"pointer", letterSpacing:"0.5px",
+  },
+  error: {
+    color:"#f87171", fontSize:12, marginTop:8, marginBottom:4,
+  },
+  landingOr: {
+    fontSize:11, color:"#444", margin:"20px 0 12px", textTransform:"uppercase", letterSpacing:"2px",
+  },
+  demoBtn: {
+    background:"transparent", border:"1px solid #1a1a1a", borderRadius:5,
+    padding:"8px 18px", color:"#888", fontSize:12, fontFamily:"'DM Mono',monospace",
+    cursor:"pointer", transition:"all .15s",
+  },
+  changeBtn: {
+    fontSize:12, color:"#888", background:"transparent", border:"1px solid #1a1a1a",
+    padding:"5px 12px", borderRadius:4, cursor:"pointer", fontFamily:"'DM Mono',monospace",
   },
 };
