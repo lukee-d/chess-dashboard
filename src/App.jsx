@@ -361,6 +361,203 @@ function ColorPerformance({ games, u, tc = "blitz" }) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// PLAYER INSIGHTS
+// ═══════════════════════════════════════════════════════════
+function PlayerInsights({ games, u, tc = "blitz" }) {
+  const filtered = games.filter(g => g.time_class === tc);
+  if (filtered.length < 5) return null;
+
+  const sorted = [...filtered].sort((a, b) => a.end_time - b.end_time);
+
+  // ── Tilt Detection ──
+  let afterLossGames = 0, afterLossWins = 0;
+  let afterWinGames = 0, afterWinWins = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    const prevResult = result(sorted[i - 1], u);
+    const currResult = result(sorted[i], u);
+    if (prevResult === "loss") {
+      afterLossGames++;
+      if (currResult === "win") afterLossWins++;
+    }
+    if (prevResult === "win") {
+      afterWinGames++;
+      if (currResult === "win") afterWinWins++;
+    }
+  }
+  const afterLossWinPct = afterLossGames ? Math.round((afterLossWins / afterLossGames) * 100) : null;
+  const afterWinWinPct = afterWinGames ? Math.round((afterWinWins / afterWinGames) * 100) : null;
+
+  let tiltInsight = "";
+  if (afterLossWinPct !== null && afterWinWinPct !== null) {
+    const diff = afterWinWinPct - afterLossWinPct;
+    if (diff > 10) tiltInsight = `You win ${afterLossWinPct}% after a loss vs ${afterWinWinPct}% after a win — a ${diff}pt drop. Consider taking a break after losses.`;
+    else if (diff > 3) tiltInsight = `Slight tilt detected: ${afterLossWinPct}% win rate after a loss vs ${afterWinWinPct}% after a win.`;
+    else tiltInsight = `No significant tilt — you win ${afterLossWinPct}% after a loss vs ${afterWinWinPct}% after a win. Mentally steady.`;
+  }
+
+  // ── Time of Day ──
+  const hourBuckets = {};
+  const hourLabels = { morning: "Morning (6am–12pm)", afternoon: "Afternoon (12pm–6pm)", evening: "Evening (6pm–12am)", night: "Night (12am–6am)" };
+  sorted.forEach(g => {
+    const h = new Date(g.end_time * 1000).getHours();
+    const bucket = h >= 6 && h < 12 ? "morning" : h >= 12 && h < 18 ? "afternoon" : h >= 18 ? "evening" : "night";
+    if (!hourBuckets[bucket]) hourBuckets[bucket] = { total: 0, wins: 0 };
+    hourBuckets[bucket].total++;
+    if (result(g, u) === "win") hourBuckets[bucket].wins++;
+  });
+
+  const timeSlots = Object.entries(hourBuckets)
+    .filter(([_, d]) => d.total >= 3)
+    .map(([bucket, d]) => ({ bucket, label: hourLabels[bucket], total: d.total, winPct: Math.round((d.wins / d.total) * 100) }))
+    .sort((a, b) => b.winPct - a.winPct);
+
+  const bestTime = timeSlots[0];
+  const worstTime = timeSlots[timeSlots.length - 1];
+
+  // ── Rating Change Per Opening ──
+  const openingRating = {};
+  for (let i = 1; i < sorted.length; i++) {
+    const g = sorted[i];
+    const op = opening(g.pgn);
+    if (!op) continue;
+    const delta = myRating(g, u) - myRating(sorted[i - 1], u);
+    if (!openingRating[op]) openingRating[op] = { delta: 0, count: 0 };
+    openingRating[op].delta += delta;
+    openingRating[op].count++;
+  }
+  const openingSorted = Object.entries(openingRating)
+    .filter(([_, d]) => d.count >= 3)
+    .sort((a, b) => b[1].delta - a[1].delta);
+  const bestOpening = openingSorted[0];
+  const worstOpening = openingSorted[openingSorted.length - 1];
+
+  // ── Average Game Length ──
+  const winLengths = [];
+  const lossLengths = [];
+  sorted.forEach(g => {
+    // Estimate moves from PGN — count move numbers
+    const moves = g.pgn ? (g.pgn.match(/\d+\./g) || []).length : 0;
+    if (moves === 0) return;
+    const res = result(g, u);
+    if (res === "win") winLengths.push(moves);
+    else if (res === "loss") lossLengths.push(moves);
+  });
+  const avgWinLength = winLengths.length ? Math.round(winLengths.reduce((a, b) => a + b, 0) / winLengths.length) : null;
+  const avgLossLength = lossLengths.length ? Math.round(lossLengths.reduce((a, b) => a + b, 0) / lossLengths.length) : null;
+
+  let lengthInsight = "";
+  if (avgWinLength && avgLossLength) {
+    const diff = avgLossLength - avgWinLength;
+    if (diff > 5) lengthInsight = `Your losses average ${avgLossLength} moves vs ${avgWinLength} for wins — you tend to lose in longer games. Endgame study could help.`;
+    else if (diff < -5) lengthInsight = `Your losses average ${avgLossLength} moves vs ${avgWinLength} for wins — you're losing quickly, possibly to tactical blunders early on.`;
+    else lengthInsight = `Wins average ${avgWinLength} moves, losses average ${avgLossLength} — similar length, no clear pattern.`;
+  }
+
+  function InsightRow({ icon, title, children }) {
+    return (
+      <div style={{ padding: "12px 0", borderBottom: "1px solid #1a1a1a" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 16 }}>{icon}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#e8e0d0", fontFamily: "'Cormorant Garamond',serif" }}>{title}</span>
+        </div>
+        <div style={{ fontSize: 12, color: "#888", lineHeight: 1.6, paddingLeft: 24 }}>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={s.panel}>
+      <h2 style={s.panelH}>Player Insights</h2>
+
+      {tiltInsight && (
+        <InsightRow icon="🧠" title="Tilt Detection">
+          {tiltInsight}
+          <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+            <div style={{ fontSize: 11 }}>
+              <span style={{ color: "#f87171" }}>After a loss:</span>{" "}
+              <span style={{ color: "#ddd", fontWeight: 600 }}>{afterLossWinPct}%</span>
+              <span style={{ color: "#555" }}> win rate ({afterLossGames} games)</span>
+            </div>
+            <div style={{ fontSize: 11 }}>
+              <span style={{ color: "#4ade80" }}>After a win:</span>{" "}
+              <span style={{ color: "#ddd", fontWeight: 600 }}>{afterWinWinPct}%</span>
+              <span style={{ color: "#555" }}> win rate ({afterWinGames} games)</span>
+            </div>
+          </div>
+        </InsightRow>
+      )}
+
+      {timeSlots.length > 1 && (
+        <InsightRow icon="🕐" title="Performance by Time of Day">
+          {bestTime && worstTime && bestTime.bucket !== worstTime.bucket
+            ? `You play best in the ${bestTime.label} (${bestTime.winPct}% win rate) and worst in the ${worstTime.label} (${worstTime.winPct}%).`
+            : "Not enough variation across time slots to draw conclusions."}
+          <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+            {timeSlots.map(t => (
+              <div key={t.bucket} style={{
+                fontSize: 11, padding: "4px 10px", background: "#0d0d0d",
+                border: "1px solid #1a1a1a", borderRadius: 4,
+              }}>
+                <span style={{ color: "#aaa" }}>{t.label.split(" (")[0]}</span>{" "}
+                <span style={{ color: t.winPct >= 50 ? "#4ade80" : "#f87171", fontWeight: 600 }}>{t.winPct}%</span>
+                <span style={{ color: "#444" }}> ({t.total}g)</span>
+              </div>
+            ))}
+          </div>
+        </InsightRow>
+      )}
+
+      {openingSorted.length > 0 && (
+        <InsightRow icon="📖" title="Rating Change by Opening">
+          {bestOpening && worstOpening ? (
+            <>
+              {bestOpening[1].delta > 0
+                ? `Best: ${bestOpening[0]} has gained you ${bestOpening[1].delta > 0 ? "+" : ""}${bestOpening[1].delta} rating over ${bestOpening[1].count} games.`
+                : `No opening has gained you rating — your best is ${bestOpening[0]} at ${bestOpening[1].delta > 0 ? "+" : ""}${bestOpening[1].delta}.`}
+              {worstOpening[0] !== bestOpening[0] && (
+                <> Worst: {worstOpening[0]} at {worstOpening[1].delta > 0 ? "+" : ""}{worstOpening[1].delta} over {worstOpening[1].count} games.</>
+              )}
+            </>
+          ) : "Not enough data yet."}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+            {openingSorted.slice(0, 5).map(([name, d]) => (
+              <div key={name} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "3px 0" }}>
+                <span style={{ color: "#aaa" }}>{name}</span>
+                <span style={{ color: d.delta >= 0 ? "#4ade80" : "#f87171", fontWeight: 600 }}>
+                  {d.delta >= 0 ? "+" : ""}{d.delta} <span style={{ color: "#444", fontWeight: 400 }}>({d.count}g)</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </InsightRow>
+      )}
+
+      {lengthInsight && (
+        <InsightRow icon="📏" title="Average Game Length">
+          {lengthInsight}
+          <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+            {avgWinLength && (
+              <div style={{ fontSize: 11 }}>
+                <span style={{ color: "#4ade80" }}>Wins:</span>{" "}
+                <span style={{ color: "#ddd", fontWeight: 600 }}>~{avgWinLength} moves</span>
+              </div>
+            )}
+            {avgLossLength && (
+              <div style={{ fontSize: 11 }}>
+                <span style={{ color: "#f87171" }}>Losses:</span>{" "}
+                <span style={{ color: "#ddd", fontWeight: 600 }}>~{avgLossLength} moves</span>
+              </div>
+            )}
+          </div>
+        </InsightRow>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // LANDING SCREEN
 // ═══════════════════════════════════════════════════════════
 function LandingScreen({ onSubmit }) {
@@ -550,8 +747,9 @@ export default function App() {
           <Puzzle puzzle={puzzle} />
         </div>
 
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <ColorPerformance games={games} u={username} tc={tc} />
+          <PlayerInsights games={games} u={username} tc={tc} />
         </div>
       </div>
 
