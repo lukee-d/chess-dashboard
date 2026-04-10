@@ -1,16 +1,50 @@
-# React + Vite
+# Chess Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A chess analytics dashboard that pulls data from the Chess.com public API and gives players actionable insights into their performance.
 
-Currently, two official plugins are available:
+**Live demo:** [chess-dashboard-two.vercel.app](https://chess-dashboard-two.vercel.app/)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+![Chess Dashboard Screenshot](screenshot.png)
 
-## React Compiler
+## What It Does
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Enter any Chess.com username and get a full breakdown of their playing data:
 
-## Expanding the ESLint configuration
+- **Rating history chart** — D3-powered line chart showing rating over time, with each game colored by result
+- **Recent games** — Last 10 games with opponent, opening, and result, linked to Chess.com
+- **Opening repertoire** — Most-played openings with win/loss/draw breakdown and win percentage
+- **Performance by color** — Win rate and net rating change as White vs Black
+- **Player insights** — Tilt detection (win rate after a loss vs after a win), performance by time of day, rating change per opening, and average game length analysis
+- **Daily puzzle** — Link to the Chess.com daily puzzle
+- **Time control toggle** — Switch between Blitz, Rapid, and Bullet views
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Technical Details
+
+- **React** with Vite for fast development and builds
+- **D3.js** for the rating history chart
+- **Chess.com PubAPI** — free, public, no authentication required
+- **Fully client-side** — no backend, no database, no API keys
+- Deployed on **Vercel** with automatic deploys from GitHub
+
+### Key Concepts
+
+- Async data fetching with error handling and loading states
+- PGN parsing to extract opening names from game notation
+- Multi-source API aggregation (stats, game archives, puzzle endpoints)
+- Derived analytics computed from raw game data (tilt detection, time-of-day bucketing, per-opening rating deltas)
+
+## Run Locally
+
+```bash
+git clone https://github.com/lukee-d/chess-dashboard.git
+cd chess-dashboard
+npm install
+npm run dev
+```
+
+## What I'd Add Next
+
+- Longer historical data (currently analyzes last 3 months)
+- Head-to-head comparison between two players
+- Win rate trends over time (rolling average)
+- Opponent rating distribution analysis
